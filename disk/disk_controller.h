@@ -5,9 +5,9 @@
 #define NUM_BLOCKS 4096
 #define DISK_PATH "../disk/vdisk"
 
-void write_block(unsigned char block[], int index);
+void write_block_to_disk(unsigned char block[], int index);
 
-void read_block(unsigned char block[], int index);
+void read_block_from_disk(unsigned char block[], int index);
 
 void attach_disk();
 

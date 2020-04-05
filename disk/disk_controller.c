@@ -4,12 +4,12 @@
 
 FILE* disk_pointer;
 
-void write_block(unsigned char block[], int index){
+void write_block_to_disk(unsigned char block[], int index){
 	fseek(disk_pointer, index * BLOCK_SIZE, SEEK_SET);
 	fwrite(block, BLOCK_SIZE, 1, disk_pointer);
 }
 
-void read_block(unsigned char block[], int index){
+void read_block_from_disk(unsigned char block[], int index){
 	fseek(disk_pointer, index * BLOCK_SIZE, SEEK_SET);
 	fread(block, BLOCK_SIZE, 1, disk_pointer);
 }

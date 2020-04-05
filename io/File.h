@@ -4,7 +4,7 @@
 // wipe disk if it exists, create fresh disk with root directory
 void initLLFS();
 
-// attatch file system to an existing disk
+// attatch to LLFS on an existing disk
 void attatchLLFS();
 
 // create new file/dir
