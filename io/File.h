@@ -1,6 +1,18 @@
 #ifndef FILE_H_
 #define FILE_H_
 
+#define MAGIC 42
+#define NUM_I_NODES 256 // ID of i-node must occupy 1 byte
+#define I_NODE_SIZE 32
+#define MAX_I_NODE_BLOCK_POINTERS 10
+#define DIR_FILE 0
+#define DATA_FILE 1
+#define SEG_BLOCKS 8
+#define MAX_FILE_NAME_CHARS 30
+#define MAX_DIR_ENTRIES 16
+#define MAX_TREE_DEPTH 4
+#define MAX_PATH_LENGTH MAX_FILE_NAME_CHARS * MAX_TREE_DEPTH + MAX_TREE_DEPTH
+
 // wipe disk if it exists, create fresh disk with root directory
 void initLLFS();
 

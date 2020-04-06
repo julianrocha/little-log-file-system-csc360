@@ -4,18 +4,6 @@
 #include "../disk/disk_controller.h"
 #include "./File.h"
 
-#define MAGIC 42
-#define NUM_I_NODES 256 // ID of i-node must occupy 1 byte
-#define I_NODE_SIZE 32
-#define MAX_I_NODE_BLOCK_POINTERS 10
-#define DIR_FILE 0
-#define DATA_FILE 1
-#define SEG_BLOCKS 8
-#define MAX_FILE_NAME_CHARS 30
-#define MAX_DIR_ENTRIES 16
-#define MAX_TREE_DEPTH 4
-#define MAX_PATH_LENGTH MAX_FILE_NAME_CHARS * MAX_TREE_DEPTH + MAX_TREE_DEPTH
-
 unsigned char segment_buffer[SEG_BLOCKS * BLOCK_SIZE];
 unsigned char i_node_map[NUM_I_NODES * 2];
 unsigned char free_vector[BLOCK_SIZE];
@@ -216,7 +204,7 @@ void create_root_i_node(){
 int create_dir_index_for_file_name(unsigned char dir_table[], char* file_name){
 	int length = strnlen(file_name, MAX_FILE_NAME_CHARS);
 	if(file_name[length] != '\0'){
-		printf("Cannot create file! File name is too long!\n");
+		// printf("Cannot create file! File name is too long!\n");
 		return -1;
 	}
 	int dir_index = -1;
@@ -226,7 +214,7 @@ int create_dir_index_for_file_name(unsigned char dir_table[], char* file_name){
 		memcpy(&i_node_index, dir_table + (i * (2 + MAX_FILE_NAME_CHARS)), sizeof(char));
 		if(i_node_index != 0){
 			if(!strncmp(file_name, dir_table + 1 + (i * (2 + MAX_FILE_NAME_CHARS)), MAX_FILE_NAME_CHARS)){
-				printf("Cannot create file! File name already exists.\n");
+				// printf("Cannot create file! File name already exists.\n");
 				dir_index = -1;
 				break;
 			}
@@ -236,7 +224,7 @@ int create_dir_index_for_file_name(unsigned char dir_table[], char* file_name){
 		}
 	}
 	if(i == MAX_DIR_ENTRIES && dir_index == -1){
-		printf("Cannot create file! Max number of files in this directory reached.\n");
+		// printf("Cannot create file! Max number of files in this directory reached.\n");
 	}
 	return dir_index;
 }
@@ -280,7 +268,7 @@ void i_node_for_file_name(unsigned char dir_table[], char* file_name, unsigned c
 }
 
 // TODO: cannot handle paths that contain //, also strtok() is not multithreaded
-void parent_structure_for_path(char* path, unsigned char file_name[], int* parent_i_node_index, int* parent_i_node_block_index, unsigned char parent_i_node[], int* parent_dir_table_block_index, unsigned char parent_dir_table[]){
+void parent_structure_for_path(char* path, unsigned char file_name[], int type, int* parent_i_node_index, int* parent_i_node_block_index, unsigned char parent_i_node[], int* parent_dir_table_block_index, unsigned char parent_dir_table[]){
 	if(path[strnlen(path, MAX_PATH_LENGTH)] != '\0'){ // Error: path is too long
 		*parent_i_node_index = -1;
 		return;
@@ -299,7 +287,7 @@ void parent_structure_for_path(char* path, unsigned char file_name[], int* paren
 		depth++;
 		token = strtok(NULL, "/"); 
 	}
-	if(depth > MAX_TREE_DEPTH){ // tree is too deep
+	if(depth > MAX_TREE_DEPTH || (depth == MAX_TREE_DEPTH && type == DIR_FILE)){ // tree is too deep
 		*parent_i_node_index = -1;
 		return;
 	}
@@ -321,13 +309,11 @@ void parent_structure_for_path(char* path, unsigned char file_name[], int* paren
 		int dir_index, type;
 		i_node_for_file_name(parent_dir_table, token, parent_i_node, parent_i_node_block_index, parent_i_node_index, &dir_index);
 		if(dir_index == -1){ // could not find this directory
-			printf("Could not find this direcotry.\n");
 			*parent_i_node_index = -1;
 			return;
 		}
 		memcpy(&type, parent_i_node + sizeof(int), sizeof(int));
 		if(type != DIR_FILE){ // a data file cannot be in the middle of the path
-			printf("A data file cannot be in the middle of the path\n");
 			*parent_i_node_index = -1;
 			return;
 		}
@@ -389,9 +375,9 @@ int create_file(char* path, int type){
 	unsigned char parent_i_node[BLOCK_SIZE];
 	unsigned char parent_dir_table[BLOCK_SIZE];
 	unsigned char file_name[MAX_FILE_NAME_CHARS + 1];
-	parent_structure_for_path(path, file_name, &parent_i_node_index, &parent_i_node_block_index, parent_i_node, &parent_dir_table_block_index, parent_dir_table);
+	parent_structure_for_path(path, file_name, type, &parent_i_node_index, &parent_i_node_block_index, parent_i_node, &parent_dir_table_block_index, parent_dir_table);
 	// Error occured if parent_i_node_index is -1
-	if(parent_i_node_block_index == -1){
+	if(parent_i_node_index == -1){
 		return -1;
 	}
 
@@ -421,7 +407,7 @@ int create_file(char* path, int type){
 int delete_file(char* path){
 	// 		return -1 if trying to delete root
 	if(!strncmp(path, "/", MAX_FILE_NAME_CHARS)){
-		printf("Cannot delete file! You may not delete the root directory.\n");
+		// printf("Cannot delete file! You may not delete the root directory.\n");
 		return -1;
 	}
 
@@ -429,7 +415,7 @@ int delete_file(char* path){
 	unsigned char parent_i_node[BLOCK_SIZE];
 	unsigned char parent_dir_table[BLOCK_SIZE];
 	unsigned char file_name[MAX_FILE_NAME_CHARS + 1];
-	parent_structure_for_path(path, file_name, &parent_i_node_index, &parent_i_node_block_index, parent_i_node, &parent_dir_table_block_index, parent_dir_table);
+	parent_structure_for_path(path, file_name, DATA_FILE, &parent_i_node_index, &parent_i_node_block_index, parent_i_node, &parent_dir_table_block_index, parent_dir_table);
 	// Error occured if parent_i_node_index is -1
 	if(parent_i_node_block_index == -1){
 		return -1;
@@ -441,7 +427,7 @@ int delete_file(char* path){
 	int i_node_block_index, i_node_index, dir_index;
 	i_node_for_file_name(parent_dir_table, file_name, i_node, &i_node_block_index, &i_node_index, &dir_index);
 	if(dir_index == -1){
-		printf("Cannot delete file! Could not find file at that path.\n");
+		// printf("Cannot delete file! Could not find file at that path.\n");
 		return -1;
 	}
 
@@ -456,7 +442,7 @@ int delete_file(char* path){
 		for(int i = 0; i < MAX_DIR_ENTRIES; i++){
 			memcpy(&index, dir_table + (i * (2 + MAX_FILE_NAME_CHARS)), sizeof(char));
 			if(index != 0){
-				printf("Cannot delete file! Directory must be empty before deleting.\n");
+				// printf("Cannot delete file! Directory must be empty before deleting.\n");
 				return -1; // cannot delete dir as it is not empty
 			}
 		}
@@ -499,6 +485,7 @@ int read_from_file(char* path, int offset, int num_bytes, char* buffer){
 	return -1;
 }
 
+/*
 int main(){
 	initLLFS();
 	// attatchLLFS();
@@ -518,3 +505,4 @@ int main(){
 
 	printf("END OF MAIN!\n");
 }
+*/
