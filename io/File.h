@@ -35,7 +35,7 @@ int delete_file(char* path);
 //	- num_bytes: number of bytes from buffer to write to file, <= length(buffer)
 //	- buffer: data to write to file
 // Return 0 means sucess, return -1 means error
-int write_to_file(char* path, int offset, int num_bytes, char* buffer);
+int write_to_file(char* path, int offset, int num_bytes, char buffer[]);
 
 // read from file NOT dir
 // Arguments
@@ -44,6 +44,6 @@ int write_to_file(char* path, int offset, int num_bytes, char* buffer);
 //	- num_bytes: number of bytes to read into buffer, <= length(buffer)
 //	- buffer: location to read file data into
 // Return 0 means sucess, return -1 means error
-int read_from_file(char* path, int offset, int num_bytes, char* buffer);
+int read_from_file(char* path, int offset, int num_bytes, char buffer[]);
 
 #endif

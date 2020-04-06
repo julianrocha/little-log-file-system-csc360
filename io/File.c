@@ -235,11 +235,15 @@ int create_empty_file_structure(int type){
 	memset(data_block, 0, BLOCK_SIZE);
 
 	int empty_block_index = write_block(data_block);
+	int file_size = BLOCK_SIZE;
+	if(type == DATA_FILE){
+		file_size = 0; // file_size must be more granular for data files
+	}
 
 	// write i-node with file name, file type, and block pointer to segment, allocate block, update i-node map
 	unsigned char i_node[BLOCK_SIZE];
 	unsigned short block_pointers[] = {empty_block_index,0,0,0,0,0,0,0,0,0,0};
-	create_i_node(i_node, BLOCK_SIZE, type, block_pointers);
+	create_i_node(i_node, file_size, type, block_pointers);
 	int i_node_block_index = write_block(i_node);
 	int i_node_index = add_i_node_to_map(i_node_block_index);
 }
@@ -475,29 +479,210 @@ int delete_file(char* path){
 	return 0;
 }
 
+// overwrite file NOT dir
+// Arguments
+//	- path: absolute path to file, file must exist
+//	- offset: number of bytes to offset from start of file, <=length(file)
+//	- num_bytes: number of bytes from buffer to write to file, <= length(buffer)
+//	- buffer: data to write to file
 // Return 0 means sucess, return -1 means error
-int write_to_file(char* path, int offset, int num_bytes, char* buffer){
-	return -1;
+int write_to_file(char* path, int offset, int num_bytes, char buffer[]){
+	if(!strncmp(path, "/", MAX_FILE_NAME_CHARS)){
+		printf("Cannot write to file! You may not write to the root directory.\n");
+		return -1;
+	}
+
+	int parent_i_node_index, parent_i_node_block_index, parent_dir_table_block_index;
+	unsigned char parent_i_node[BLOCK_SIZE];
+	unsigned char parent_dir_table[BLOCK_SIZE];
+	unsigned char file_name[MAX_FILE_NAME_CHARS + 1];
+	parent_structure_for_path(path, file_name, DATA_FILE, &parent_i_node_index, &parent_i_node_block_index, parent_i_node, &parent_dir_table_block_index, parent_dir_table);
+	// Error occured if parent_i_node_index is -1
+	if(parent_i_node_block_index == -1){
+		return -1;
+	}
+
+	// find i_node block, block index, i_node index, dir_index
+	// 		return -1 if couldn't find i_node for file_name
+	unsigned char i_node[BLOCK_SIZE];
+	int i_node_block_index, i_node_index, dir_index;
+	i_node_for_file_name(parent_dir_table, file_name, i_node, &i_node_block_index, &i_node_index, &dir_index);
+	if(dir_index == -1){
+		printf("Cannot write to file! Could not find file at that path.\n");
+		return -1;
+	}
+
+	int file_size, type;
+	memcpy(&file_size, i_node, sizeof(int));
+	memcpy(&type, i_node + sizeof(int), sizeof(int));
+	if(type == DIR_FILE){
+		printf("Cannot write to file! You may not write to a directory.\n");
+		return -1;
+	}
+	if(offset > file_size || offset < 0){
+		printf("Cannot write to file! Invalid offset.\n");
+		return -1;
+	}
+	if((((file_size % BLOCK_SIZE) + num_bytes) / BLOCK_SIZE) > (NUM_BLOCKS - current_allocated_blocks)){
+		printf("Cannot write to file! Not enough space on disk.\n");
+		return -1;
+	}
+	if((offset + num_bytes) > (MAX_I_NODE_BLOCK_POINTERS * BLOCK_SIZE)){
+		printf("Cannot write to file! Not enough space in file.\n");
+		return -1;
+	}
+
+	// FINISHED REQUEST VALIDATION -> BEGIN WRITING TO FILE
+	
+	unsigned char block[BLOCK_SIZE];
+	int num_bytes_written = 0;
+	int num_bytes_remaining = num_bytes;
+	for(int block_pointer_index = offset / BLOCK_SIZE; block_pointer_index <= (offset + num_bytes) / BLOCK_SIZE; block_pointer_index++){
+		short block_pointer;
+		memcpy(&block_pointer, i_node + (sizeof(int) * 2) + (sizeof(unsigned char) * block_pointer_index), sizeof(unsigned short));
+		if(block_pointer != 0){
+			read_block(block, block_pointer);   // read the block to be overwritten
+			deallocate_block(block_pointer);	// de-allocate prev block
+		} else{
+			memset(block, 0, BLOCK_SIZE);	// this is a new block
+		}
+
+		int buffer_start;
+		if(block_pointer_index == offset / BLOCK_SIZE){ // if on first block of write range
+			buffer_start = offset % BLOCK_SIZE; // begin writing at offset in block
+		} else{
+			buffer_start = 0; // else begin at start of block
+		}
+
+		int num_bytes_to_write;
+		if(num_bytes_remaining + buffer_start > BLOCK_SIZE){
+			num_bytes_to_write = BLOCK_SIZE - buffer_start; // will need to write to a block after this so just fill the rest of this block
+		} else{
+			num_bytes_to_write = num_bytes_remaining;
+		}
+
+		memcpy(block + buffer_start, buffer + num_bytes_written, num_bytes_to_write);
+		num_bytes_written += num_bytes_to_write;
+		num_bytes_remaining -= num_bytes_to_write;
+		block_pointer = write_block(block);	// write new block and allocate
+		memcpy(i_node + (sizeof(int) * 2) + (sizeof(unsigned char) * block_pointer_index), &block_pointer, sizeof(unsigned short)); // update i_node block pointer
+	}
+
+	// update_file_size, not all writes increase file_size
+	if(offset + num_bytes > file_size){
+		file_size = offset + num_bytes;
+	}
+	memcpy(i_node, &file_size, sizeof(int));
+	// de_allocate old i_node, write i_node, update_i_node_map
+	deallocate_block(i_node_block_index);
+	i_node_block_index = write_block(i_node);
+	update_i_node_map(i_node_index, i_node_block_index);
+
+	return 0;
 }
 
+// read from file NOT dir
+// Arguments
+//	- path: absolute path to file, file must exist
+//	- offset: number of bytes to offset from start of file, <=length(file)
+//	- num_bytes: number of bytes to read into buffer, <= length(buffer)
+//	- buffer: location to read file data into
 // Return 0 means sucess, return -1 means error
-int read_from_file(char* path, int offset, int num_bytes, char* buffer){
-	return -1;
+int read_from_file(char* path, int offset, int num_bytes, char buffer[]){
+	if(!strncmp(path, "/", MAX_FILE_NAME_CHARS)){
+		printf("Cannot read file! You may not read the root directory.\n");
+		return -1;
+	}
+
+	int parent_i_node_index, parent_i_node_block_index, parent_dir_table_block_index;
+	unsigned char parent_i_node[BLOCK_SIZE];
+	unsigned char parent_dir_table[BLOCK_SIZE];
+	unsigned char file_name[MAX_FILE_NAME_CHARS + 1];
+	parent_structure_for_path(path, file_name, DATA_FILE, &parent_i_node_index, &parent_i_node_block_index, parent_i_node, &parent_dir_table_block_index, parent_dir_table);
+	// Error occured if parent_i_node_index is -1
+	if(parent_i_node_block_index == -1){
+		return -1;
+	}
+
+	// find i_node block, block index, i_node index, dir_index
+	// 		return -1 if couldn't find i_node for file_name
+	unsigned char i_node[BLOCK_SIZE];
+	int i_node_block_index, i_node_index, dir_index;
+	i_node_for_file_name(parent_dir_table, file_name, i_node, &i_node_block_index, &i_node_index, &dir_index);
+	if(dir_index == -1){
+		printf("Cannot read file! Could not find file at that path.\n");
+		return -1;
+	}
+
+	int file_size, type;
+	memcpy(&file_size, i_node, sizeof(int));
+	memcpy(&type, i_node + sizeof(int), sizeof(int));
+	if(type == DIR_FILE){
+		printf("Cannot read file! You may not read a directory.\n");
+		return -1;
+	}
+	if(offset > file_size || offset < 0){
+		printf("Cannot read file! Invalid offset.\n");
+		return -1;
+	}
+	if(offset + num_bytes > file_size){
+		printf("Cannot read file! Requesting data outside range of this file.\n");
+		return -1;
+	}
+
+	// FINISHED REQUEST VALIDATION -> BEGIN READING FILE
+	
+	unsigned char block[BLOCK_SIZE];
+	int num_bytes_read = 0;
+	int num_bytes_remaining = num_bytes;
+	for(int block_pointer_index = offset / BLOCK_SIZE; block_pointer_index <= (offset + num_bytes) / BLOCK_SIZE; block_pointer_index++){
+		short block_pointer;
+		memcpy(&block_pointer, i_node + (sizeof(int) * 2) + (sizeof(unsigned char) * block_pointer_index), sizeof(unsigned short));
+		read_block(block, block_pointer);
+
+		int buffer_start;
+		if(block_pointer_index == offset / BLOCK_SIZE){ // if on first block of read range
+			buffer_start = offset % BLOCK_SIZE; // begin read at offset in block
+		} else{
+			buffer_start = 0; // else begin at start of block
+		}
+
+		int num_bytes_to_read;
+
+		if(num_bytes_remaining + buffer_start > BLOCK_SIZE){
+			num_bytes_to_read = BLOCK_SIZE - buffer_start; // will need to read a block after this so just fill the rest of this block
+		} else{
+			num_bytes_to_read = num_bytes_remaining;
+		}
+		printf("%d, %d, %d, %s, %s\n", num_bytes_read, buffer_start, num_bytes_to_read, block, buffer);
+		memcpy(buffer + num_bytes_read, block + buffer_start, num_bytes_to_read);
+		num_bytes_read += num_bytes_to_read;
+		num_bytes_remaining -= num_bytes_to_read;
+	}
+
+	return 0;
 }
 
-/*
+
 int main(){
 	initLLFS();
 	// attatchLLFS();
 
 	int status;
-	status = create_file("/hello_world", DIR_FILE);
+	status = create_file("/directory", DIR_FILE);
 	printf("status: %d\n", status);
-	status = create_file("/hello_world/cando", DATA_FILE);
-	printf("status: %d\n", status);
-	status = delete_file("/hello_world/cando");
+	status = create_file("/directory/myfile", DATA_FILE);
 	printf("status: %d\n", status);
 
+	char buffer[] = "Hello World!";
+	status = write_to_file("/directory/myfile", 0, 13, buffer);
+	printf("status: %d\n", status);
+
+	char buffer2[13];
+	memset(buffer2, 0, 13);
+	status = read_from_file("/directory/myfile", 0, 13, buffer2);
+	printf("status: %d\n", status);
+	printf("%s\n", buffer2);
 	sync_to_disk();
 
 	printf("i-node 0 is at block: %d, i-node 1 is at block: %d, i-node 2 is at block: %d\n",i_node_to_block(0), i_node_to_block(1), i_node_to_block(2));
@@ -505,4 +690,4 @@ int main(){
 
 	printf("END OF MAIN!\n");
 }
-*/
+
