@@ -1,0 +1,66 @@
+Architecture of my implementation of LLFS:
+
+How to use LLFS in your C program:
+	- #include "../io/File.h" to access the interfacing functions of the file system
+	- initLLFS() will delete a vdisk if it exists, then it will create a fresh formatted one containing a root direcotry.
+	- attachLLFS() will attatch the program to an existing vdisk.
+	- One of initLLFS or attachLLFS must be called first in order to use LLFS
+	- int create_file(char* path, int type);
+		- Creates a new file or directory at path
+		- Return 0 means success, return -1 means error
+		- type == 0 will create a directory, type == 1 will create a file
+		- Uses absolute paths, entire parent path must exist before calling
+		- see test_create_and_delete.c to see how it is used
+	- int delete_file(char* path);
+		- Deletes a file or directory
+		- Return 0 means success, return -1 means error
+		- Uses absolute paths
+		- if deleting directory, directory must be empty first
+		- see test_create_and_delete.c to see how it is used
+	- int write_to_file(char* path, unsigned int offset, unsigned int num_bytes, char buffer[]);
+		- Writes to a file, NOT a directory
+		- Return 0 means success, return -1 means error
+		- path: absolute path to file, file must exist -> so create_file() must be run beforehand
+		- offset: number of bytes to offset from start of file, <= current file_size
+		- num_bytes: number of bytes from buffer to write to file, starting at offset, <= length(buffer)
+		- see test_read_and_write.c to see how it is used
+	- int read_from_file(char* path, unsigned int offset, unsigned int num_bytes, char buffer[]);
+		- Reads from a file, NOT a directory, into a buffer
+		- Return 0 means success, return -1 means error
+		- path: absolute path to file, file must exist -> create_file must be called before hand, must contain data so write_to_file must be called as well
+		- offset, num_bytes are same as write_to_file
+		- see test_read_and_write.c to see how it is used
+
+Design Tradeoffs:
+
+** Theme: I generally tried to aim for design/code simplicity over optimal resource utilization since this is my first time prototyping a file system **
+
+	- i-nodes are only 28 bytes but they occupy a whole block. While this wastes space, it makes indexing the i-nodes much simpler as they can be associated with a block index.
+	- When any file/directory is modified or created, any of its affected data blocks are appended to segment, followed by the updated i-node for the file. In this sense, other than the free vector/i-node map, all block pointers point "backwards" towards the start of log. As per the resources linked at the bottom of this report, if all block pointers point "backwards" than this aids when developing the garbage collection feature. While I didn't have time to implement garbage collection, it could at least be added later.
+ 	- The segment size is 8 blocks. This was chosen because it is small enough to sync the segment to disk frequently and NUM_BLOCKS = 4096 is evenly divisible by 8 so when segment reaches end of disk it can wrap back around to the start seamlessly (skipping over the first 8 blocks containing super/free/i-node map of course).
+	- super block, free vector, i-node map, all occupy 3 blocks but the first 8 get allocated. This is to prevent any future segment from writing to this segment. It wastes 5 blocks but it simplifies the code. 
+	- Max num i-nodes on disk is 256 because, in direcotry tables, i-node index must occupy one byte. One byte has 256 indices, so a direcotry table has maximum 16 entries x (1 byte for i-node + 31 bytes for file_name) = 1 block.
+	- This implementation has no indirect i-node blocks, just 10 direct block pointers. This puts a cap on the maximum file size to 10 * 512 bytes = 5120 bytes but it makes the code for traversing i-nodes much simpler. 
+	- Read head is free to move all over disk, if the block is in the segment then it will read from memory, else it will read from disk. I made the assumption here that disk reads are not expensive when compared to disk writes.
+	- With the exception of initializng disk with super/free/i-node map, all writes are appended to the end of the segment. When full the segment is appended to log one block at a time. When this sync operation occurs, the free vector/i-node map are written to disk as well. So for almost all writes, write head dumps 8 blocks to end of log then moves all the way to start of disk to update the free vector/i-node map. Operating under the assumption that writes are expensive and trying to keep the write head at end of log as much as possible but it does need to move far back to update the free vector/i-node map. 
+	- See the global variables in File.c to understand what sort of state is stored in memory
+
+Testing:
+	- All tests which demonstrate functionality can be found in /apps
+	- Running `make` in /apps will build 3 executable test_files, do this before attempting to run tests
+	- Running test_disk_driver.o will test the disk_driver functions like reading/writing blocks to disk and wiping/attatching a disk
+	- Running test_create_and_delete.o will test the various valid/invalid scenarios involving create_file()/delete_file()
+	- Running test_read_and_write.o will test the various valid/invalid scenarios involving write_to_file()/read_from_file()
+
+Known Bugs:
+	- Does not handle multithreaded applications. For example strtok() (used to parse paths) is not thread safe.
+	- Does not handle paths/file names which contain the "/" character.
+	- Does not have any garbage collection of deallocated blocks, so once the log has reached the end of the disk, the disk must be reformatted.
+	- Crash recovery is not perfect, can reconnect to an existing disk using attatchLLFS() but if vdisk is in a bad state then it may not work properly
+
+Useful Resources During development:
+- https://web.stanford.edu/~ouster/cgi-bin/papers/lfs.pdf
+- http://www.eecs.harvard.edu/~cs161/notes/lfs.pdf
+- https://www.tutorialspoint.com/cprogramming/c_data_types.htm
+- https://ieeexplore.ieee.org/document/6827914
+- CSC 360 LLFS Assignment description / lecture slides / forums
